@@ -1,3 +1,5 @@
+# -*- coding:utf-8 -*-
+
 from utils import SSHConnection
 
 from deploy import Deploy

@@ -1,4 +1,4 @@
-import sys
+# -*- coding:utf-8 -*-
 
 class _const:
 
