@@ -1,6 +1,3 @@
-#! /usr/bin/python
-
-import paramiko
 import os
 import time
 import sys
@@ -9,131 +6,132 @@ import urllib
 import urllib.request
 
 from utils import SSHConnection
+from utils.Const import Const
 
 class Deploy:
     
     __config_file = ''
+    config = configparser.ConfigParser()
 
-    def __init__ (self, config_file):
+    def __init__(self, config_file):
         self.__config_file = config_file
+        print('loading config file:', self.__config_file)
+        self.config.read(self.__config_file)
+        print('loading config file success!')
 
     def deploy(self):
         start = int(round(time.time() * 1000))
-
-        CONFIG_SECTIONS_GLOBAL = 'global'
-        CONFIG_SECTIONS_LOCAL = 'local'
-        CONFIG_SECTIONS_REMOTE = 'remote'
-
-        NOW = time.strftime('%Y%m%d_%H%M%S')
-
-        print ('loading config file:', self.__config_file)
-        config = configparser.ConfigParser()
-        config.read(self.__config_file)
-        print ('loading config file success!')
+        now = time.strftime('%Y%m%d_%H%M%S')
 
         # global
-        PROJECT_NAME = config.get(CONFIG_SECTIONS_GLOBAL, 'project_name')
-        ENV = config.get(CONFIG_SECTIONS_GLOBAL, 'env')
+        project_name = self.config.get(Const.CONFIG_SECTIONS_GLOBAL, 'project_name')
+        env = self.config.get(Const.CONFIG_SECTIONS_GLOBAL, 'env')
 
         # local
-        LOCAL_PROJECT_DIR = config.get(CONFIG_SECTIONS_LOCAL, 'project_dir')
-        SRC = LOCAL_PROJECT_DIR + '/target/ROOT.war'
+        project_dir = self.config.get(Const.CONFIG_SECTIONS_LOCAL, 'project_dir')
+        war_location = self.config.get(Const.CONFIG_SECTIONS_LOCAL, 'war_location')
 
         # remote
-        REMOTE_HOSTNAME = config.get(CONFIG_SECTIONS_REMOTE, 'hostname')
-        REMOTE_PORT = config.getint(CONFIG_SECTIONS_REMOTE, 'port')
-        REMOTE_USERNAME = config.get(CONFIG_SECTIONS_REMOTE, 'username')
-        REMOTE_PASSWORD = config.get(CONFIG_SECTIONS_REMOTE, 'password')
+        remote_hostname = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'hostname')
+        remote_port = self.config.getint(Const.CONFIG_SECTIONS_REMOTE, 'port')
+        remote_username = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'username')
+        remote_password = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'password')
 
-        REMOTE_DB_USERNAME = config.get(CONFIG_SECTIONS_REMOTE, 'db_username')
-        REMOTE_DB_PASSWORD = config.get(CONFIG_SECTIONS_REMOTE, 'db_password')
-        REMOTE_DB_PORT = config.get(CONFIG_SECTIONS_REMOTE, 'db_port')
-        REMOTE_DB_NAME = config.get(CONFIG_SECTIONS_REMOTE, 'db_name')
+        remote_db_username = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'db_username')
+        remote_db_password = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'db_password')
+        remote_db_port = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'db_port')
+        remote_db_name = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'db_name')
 
-        TMP_DIR = config.get(CONFIG_SECTIONS_REMOTE, 'tmp_dir')
-        BAK_DIR = config.get(CONFIG_SECTIONS_REMOTE, 'bak_dir')
-        BAK_DB_DIR = BAK_DIR + '/db'
-        BAK_APP_DIR = BAK_DIR + '/app'
+        tmp_dir = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'tmp_dir')
+        bak_dir = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'bak_dir')
+        bak_db_dir = bak_dir + '/db'
+        bak_app_dir = bak_dir + '/app'
 
-        TOMCAT_HOME = config.get(CONFIG_SECTIONS_REMOTE, 'tomcat_home')
-        APP_TEST_URL = config.get(CONFIG_SECTIONS_REMOTE, 'app_test_url')
+        tomcat_home = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'tomcat_home')
+        app_test_url = self.config.get(Const.CONFIG_SECTIONS_REMOTE, 'app_test_url')
 
-        KEY_MAVEN_HOME = 'MAVEN_HOME'
-        MAVEN_HOME = os.getenv(KEY_MAVEN_HOME)
+        key_maven_home = 'MAVEN_HOME'
+        maven_home = os.getenv(key_maven_home)
 
-        if (MAVEN_HOME == None):
-            print ('没有配置环境变量[' + KEY_MAVEN_HOME + ']')
-            os._exit(0)
+        if maven_home is None:
+            print('没有配置环境变量[' + key_maven_home + ']')
+            return
 
         # 本地打包
-        cmd = MAVEN_HOME + '/bin/mvn -f' + LOCAL_PROJECT_DIR + '/pom.xml package -Denv=' + ENV + ' -Dmaven.test.skip=true -q'
-        print ('Running local command:', cmd)
+        cmd = 'mvn -f ' + project_dir + '/pom.xml clean install -Dmaven.test.skip=true -P ' + env + ' -q'
+        print('Running local command:', cmd)
         os.system(cmd)
-        print ('Running local command success, file path:', SRC)
+        print('Running local command success')
 
         # 建立远程连接
-        ssh = SSHConnection.SSHConnection(REMOTE_HOSTNAME, REMOTE_PORT, REMOTE_USERNAME, REMOTE_PASSWORD)
-        ssh.SSHClient()
+        ssh = SSHConnection.SSHConnection(remote_hostname, remote_port, remote_username, remote_password)
+        ssh.ssh_client()
 
         # war包上传
-        ssh.upload(SRC, TMP_DIR + '/ROOT.war')
+        ssh.upload(war_location, tmp_dir + '/everobo.war')
 
         # 远程数据库备份
-        print ('backup database....')
-        ssh.exec_command('mysqldump -u' + REMOTE_DB_USERNAME + ' -p' + REMOTE_DB_PASSWORD + ' ' + ' -P' + REMOTE_DB_PORT + ' ' + REMOTE_DB_NAME + ' > ' + BAK_DB_DIR + '/' + NOW + '.sql')
-        print ('backup database success')
+        print('backup database....')
+        ssh.exec_command('mysqldump -u' + remote_db_username + ' -p' + remote_db_password + ' ' + ' -P' + remote_db_port
+                         + ' ' + remote_db_name + ' > ' + bak_db_dir + '/' + now + '.sql')
+        print('backup database success')
 
         # 远程关闭tomcat
-        print ('stop tomcat....')
-        ssh.exec_command(TOMCAT_HOME + '/bin/shutdown.sh')
-        print ('stop tomcat success')
+        print('shutdown tomcat....')
+        ssh.exec_command(tomcat_home + '/bin/shutdown.sh')
+        print('stop tomcat success')
 
-        print ('kill process....')
-        ssh.exec_command('ps -ef | grep ' + TOMCAT_HOME + ' | grep -v grep | awk \'{print $2}\' | xargs kill -15')
-        print ('kill process success')
+        print('kill tomcat process....')
+        ssh.exec_command('ps -ef | grep ' + tomcat_home + ' | grep -v grep | awk \'{print $2}\' | xargs kill -15')
+        print('kill tomcat process success')
 
         # 远程备份应用
-        print ('backup webapp....')
-        ssh.exec_command('cp -r ' + TOMCAT_HOME + '/webapps/ROOT ' + BAK_APP_DIR + '/' + NOW)
-        print ('backup webapp success')
+        print('backup webapp....')
+        ssh.exec_command('cp -r ' + tomcat_home + '/webapps/everobo* ' + bak_app_dir + '/' + now)
+        print('backup webapp success')
 
         # 远程删除工程
-        print ('remove project....')
-        ssh.exec_command('rm -rf ' + TOMCAT_HOME + '/webapps/ROOT*')
-        print ('remove project success')
+        print('remove project....')
+        ssh.exec_command('rm -rf ' + tomcat_home + '/webapps/everobo*')
+        print('remove project success')
 
         # 远程清空缓存
-        print ('remove work....')
-        ssh.exec_command('rm -rf ' + TOMCAT_HOME + '/work')
-        print ('remove work success')
+        print('remove work....')
+        ssh.exec_command('rm -rf ' + tomcat_home + '/work')
+        print('remove work success')
 
         # 远程移动war到tomcat下
-        print ('mv war....')
-        SRC = TMP_DIR + '/ROOT.war'
-        DST = TOMCAT_HOME + '/webapps/'
-        ssh.exec_command( 'mv %s %s' % (SRC, DST))
-        print ('mv war success: %s --> %s' % (SRC, DST))
+        print('mv war....')
+        src = tmp_dir + '/everobo.war'
+        dst = tomcat_home + '/webapps/'
+        ssh.exec_command('mv %s %s' % (src, dst))
+        print('mv war success: %s --> %s' % (src, dst))
 
         # 远程启动tomcat
-        print ('start tomcat....')
-        ssh.exec_command(TOMCAT_HOME + '/bin/startup.sh')
-        print ('start tomcat success')
+        print('start tomcat....')
+        ssh.exec_command(tomcat_home + '/bin/startup.sh')
+        print('start tomcat success')
 
         # 关闭连接
         ssh.close()
 
+        print('wait tomcat to starting....')
+        for i in range(1, 5):
+            time.sleep(1)
+            print('already wait %d second ' % i)
+
         # 检测是否成功
-        print ('connectionning', APP_TEST_URL, '....')
-        response = urllib.request.urlopen(APP_TEST_URL)
-        print ('connection', APP_TEST_URL, ' http code:', response.getcode())
-        if(response.getcode() == 200):
-            print ('Success!')
+        print('connectionning ', app_test_url, '....')
+        response = urllib.request.urlopen(app_test_url)
+        print('connection', app_test_url, ' http code:', response.getcode())
+        if response.getcode() is 200:
+            print('Success!')
         else:
-            print ('Fail !!!')
+            print('Fail !!!')
 
         end = int(round(time.time() * 1000))
+        print('deploy %s use time %dms.' % (project_name, (end - start)))
 
-        print ('deploy %s use time %dms.' % (PROJECT_NAME, (end - start)))
 
 if __name__ == '__main__':
     deploy = Deploy((sys.argv[1]))
